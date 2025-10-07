@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+ <link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-512.png">
+<meta name="theme-color" content="#00f5ff">
+<meta name="theme-color" content="#00f5ff">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Musika MP3 Player</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="manifest.json">
+</head>
+<body>
+  <div class="container">
+    <h1 class="title">⚡ Musika MP3 Player</h1>
+
+    <canvas id="visualizer"></canvas>
+
+    <audio id="audio" controls></audio>
+
+    <div class="controls">
+      <input type="file" id="fileInput" accept="audio/*" multiple>
+      <div class="btn-group">
+        <button id="prevBtn">⏮️</button>
+        <button id="shuffleBtn">🔀</button>
+        <button id="nextBtn">⏭️</button>
+      </div>
+    </div>
+
+    <div class="equalizer">
+      <label>Bass <input type="range" id="bass" min="-10" max="10" value="0"></label>
+      <label>Mid <input type="range" id="mid" min="-10" max="10" value="0"></label>
+      <label>Treble <input type="range" id="treble" min="-10" max="10" value="0"></label>
+    </div>
+
+    <div class="theme-switcher">
+      <h3>🎨 Tema:</h3>
+      <button class="theme-btn" data-theme="blue">Neon Biru</button>
+      <button class="theme-btn" data-theme="green">Neon Hijau</button>
+      <button class="theme-btn" data-theme="purple">Neon Ungu</button>
+    </div>
+
+    <h3>Playlist</h3>
+    <ul id="playlist"></ul>
+  </div>
+
+  <div id="miniPlayer" class="floating">
+    <span id="miniTitle">🎶 Tidak ada lagu</span>
+    <div>
+      <button id="miniPrev">⏮️</button>
+      <button id="miniPlay">⏯️</button>
+      <button id="miniNext">⏭️</button>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
