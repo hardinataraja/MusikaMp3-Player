@@ -1,4 +1,4 @@
-// === MUSIKA MP3 PLAYER (versi akses otomatis File System Access API) ===
+// === MUSIKA MP3 PLAYER (versi tombol permanen + auto-remember) ===
 const audio = document.getElementById('audio');
 const playlistEl = document.getElementById('playlist');
 const prevBtn = document.getElementById('prevBtn');
@@ -10,10 +10,9 @@ const miniPrev = document.getElementById('miniPrev');
 const miniPlay = document.getElementById('miniPlay');
 const miniNext = document.getElementById('miniNext');
 
-let playlist = [];
+let playlist = JSON.parse(localStorage.getItem('playlist') || '[]');
 let currentIndex = 0;
 let shuffleMode = false;
-let musicFolderHandle = null;
 
 // === AUDIO CONTEXT + EQ + VISUALIZER ===
 const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -55,89 +54,54 @@ function draw() {
 }
 draw();
 
-// === SIMPAN DAN MUAT HANDLE FOLDER ===
-async function saveFolderHandle(handle) {
-  if (window.localStorage && handle) {
-    const perm = await handle.requestPermission({ mode: 'read' });
-    if (perm === 'granted') {
-      localStorage.setItem('musicFolder', await handle.name);
-      musicFolderHandle = handle;
-    }
-  }
-}
-
-async function loadSavedFolder() {
-  if ('storage' in navigator && 'getDirectory' in navigator.storage) {
-    try {
-      const handles = await navigator.storage.getDirectory();
-      if (handles) {
-        // placeholder, not needed here for Chrome
-      }
-    } catch {}
-  }
-  // Check if previously granted handle exists (using File System Access API)
-  if ('showDirectoryPicker' in window && 'storage' in navigator) {
-    try {
-      const persisted = await navigator.storage.persist();
-      // Not truly restoring yet; browsers still limit this. We'll ask user if needed.
-    } catch {}
-  }
-}
-
-// === PILIH FOLDER / FILE MP3 ===
-async function pilihFolderMusik() {
-  if ('showDirectoryPicker' in window) {
-    try {
-      const handle = await window.showDirectoryPicker();
-      musicFolderHandle = handle;
-      await muatSemuaMP3(handle);
-      await saveFolderHandle(handle);
-    } catch (e) {
-      console.log("Folder tidak dipilih:", e);
-    }
-  } else {
-    // fallback ke input file
-    buatTombolFileManual();
-  }
-}
-
-// === MUAT SEMUA MP3 DARI FOLDER ===
-async function muatSemuaMP3(handle) {
-  playlist = [];
-  for await (const entry of handle.values()) {
-    if (entry.kind === 'file' && entry.name.toLowerCase().endsWith('.mp3')) {
-      const file = await entry.getFile();
-      const url = URL.createObjectURL(file);
-      playlist.push({ name: file.name, url });
-    }
-  }
-  renderPlaylist();
-  playIndex(0);
-}
-
-// === BUAT TOMBOL PILIH FILE MANUAL JIKA API TIDAK DIDUKUNG ===
-function buatTombolFileManual() {
-  if (document.getElementById('manualBtn')) return;
+// === BUAT TOMBOL PILIH FILE PERMANEN ===
+function buatTombolPilih() {
+  if (document.getElementById('pickBtn')) return;
   const btn = document.createElement('button');
-  btn.id = 'manualBtn';
+  btn.id = 'pickBtn';
   btn.textContent = "📂 Pilih File MP3";
-  btn.style.marginTop = '10px';
+  btn.style.margin = '15px';
+  btn.style.fontSize = '16px';
+  btn.style.padding = '10px';
   btn.onclick = async () => {
-    const picker = document.createElement('input');
-    picker.type = 'file';
-    picker.accept = 'audio/*';
-    picker.multiple = true;
-    picker.onchange = e => {
-      [...e.target.files].forEach(f=>{
-        const url = URL.createObjectURL(f);
-        playlist.push({ name: f.name, url });
-      });
+    try {
+      // Gunakan File System Access API jika tersedia
+      if ('showOpenFilePicker' in window) {
+        const handles = await window.showOpenFilePicker({
+          multiple: true,
+          types: [{ description: 'Audio Files', accept: {'audio/*': ['.mp3']}}]
+        });
+        playlist = [];
+        for (const handle of handles) {
+          const file = await handle.getFile();
+          const url = URL.createObjectURL(file);
+          playlist.push({ name: file.name, url });
+        }
+      } else {
+        // fallback ke <input type="file">
+        const picker = document.createElement('input');
+        picker.type = 'file';
+        picker.accept = 'audio/*';
+        picker.multiple = true;
+        picker.onchange = e => {
+          playlist = [...e.target.files].map(f => ({
+            name: f.name,
+            url: URL.createObjectURL(f)
+          }));
+          renderPlaylist();
+          playIndex(0);
+        };
+        picker.click();
+        return;
+      }
+      localStorage.setItem('playlist', JSON.stringify(playlist.map(p => ({ name: p.name }))));
       renderPlaylist();
       playIndex(0);
-    };
-    picker.click();
+    } catch (err) {
+      console.log('Batal memilih file', err);
+    }
   };
-  document.querySelector('.container').appendChild(btn);
+  document.querySelector('.container').prepend(btn);
 }
 
 // === RENDER & PUTAR ===
@@ -177,11 +141,9 @@ miniPlay.onclick = ()=> audio.paused ? audio.play() : audio.pause();
 audio.addEventListener('ended', nextSong);
 function nextSong(){
   if(playlist.length===0) return;
-  if(shuffleMode){
-    currentIndex = Math.floor(Math.random()*playlist.length);
-  } else {
-    currentIndex = (currentIndex+1)%playlist.length;
-  }
+  currentIndex = shuffleMode
+    ? Math.floor(Math.random()*playlist.length)
+    : (currentIndex+1)%playlist.length;
   playIndex(currentIndex);
 }
 function prevSong(){
@@ -201,16 +163,17 @@ document.querySelectorAll('.theme-btn').forEach(btn=>{
 const savedTheme = localStorage.getItem('theme');
 if(savedTheme) document.documentElement.setAttribute('data-theme', savedTheme);
 
-// === INISIASI ===
+// === AUDIO CONTEXT FIX (untuk Android) ===
 document.body.addEventListener('click', ()=>{ if(ctx.state==='suspended') ctx.resume(); });
 
+// === INISIALISASI ===
 (async ()=>{
-  // Jika sudah ada izin sebelumnya, langsung muat
-  if ('showDirectoryPicker' in window && (await navigator.permissions.query({name: 'file-system-access'})).state === 'granted') {
-    try {
-      await loadSavedFolder();
-    } catch {}
+  buatTombolPilih();
+
+  // Kalau playlist sebelumnya tersimpan, tampilkan otomatis
+  if (playlist.length > 0) {
+    renderPlaylist();
   } else {
-    buatTombolFileManual();
+    console.log("Belum ada lagu tersimpan, silakan pilih file MP3.");
   }
 })();
