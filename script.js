@@ -1,4 +1,6 @@
-// === MUSIKA MP3 PLAYER (versi tombol permanen + auto-remember) ===
+// === MUSIKA MP3 PLAYER (versi offline dengan IndexedDB) ===
+import { openDB } from 'https://unpkg.com/idb?module';
+
 const audio = document.getElementById('audio');
 const playlistEl = document.getElementById('playlist');
 const prevBtn = document.getElementById('prevBtn');
@@ -10,11 +12,37 @@ const miniPrev = document.getElementById('miniPrev');
 const miniPlay = document.getElementById('miniPlay');
 const miniNext = document.getElementById('miniNext');
 
-let playlist = JSON.parse(localStorage.getItem('playlist') || '[]');
+let playlist = [];
 let currentIndex = 0;
 let shuffleMode = false;
 
-// === AUDIO CONTEXT + EQ + VISUALIZER ===
+// === INIT IndexedDB ===
+let db;
+async function initDB() {
+  db = await openDB('musika-db', 1, {
+    upgrade(db) {
+      db.createObjectStore('songs', { keyPath: 'name' });
+    },
+  });
+}
+
+// === SIMPAN & MUAT MP3 ===
+async function simpanMP3(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  await db.put('songs', { name: file.name, data: arrayBuffer });
+}
+
+async function muatSemuaMP3() {
+  const all = await db.getAll('songs');
+  playlist = all.map(song => {
+    const blob = new Blob([song.data], { type: 'audio/mpeg' });
+    const url = URL.createObjectURL(blob);
+    return { name: song.name, url };
+  });
+  renderPlaylist();
+}
+
+// === AUDIO CONTEXT + VISUALIZER ===
 const ctx = new (window.AudioContext || window.webkitAudioContext)();
 const source = ctx.createMediaElementSource(audio);
 const bass = ctx.createBiquadFilter(); bass.type = "lowshelf";
@@ -54,57 +82,33 @@ function draw() {
 }
 draw();
 
-// === BUAT TOMBOL PILIH FILE PERMANEN ===
+// === PILIH FILE ===
 function buatTombolPilih() {
   if (document.getElementById('pickBtn')) return;
   const btn = document.createElement('button');
   btn.id = 'pickBtn';
-  btn.textContent = "📂 Pilih File MP3";
+  btn.textContent = "📂 Tambah Lagu MP3";
   btn.style.margin = '15px';
   btn.style.fontSize = '16px';
   btn.style.padding = '10px';
   btn.onclick = async () => {
-    try {
-      // Gunakan File System Access API jika tersedia
-      if ('showOpenFilePicker' in window) {
-        const handles = await window.showOpenFilePicker({
-          multiple: true,
-          types: [{ description: 'Audio Files', accept: {'audio/*': ['.mp3']}}]
-        });
-        playlist = [];
-        for (const handle of handles) {
-          const file = await handle.getFile();
-          const url = URL.createObjectURL(file);
-          playlist.push({ name: file.name, url });
-        }
-      } else {
-        // fallback ke <input type="file">
-        const picker = document.createElement('input');
-        picker.type = 'file';
-        picker.accept = 'audio/*';
-        picker.multiple = true;
-        picker.onchange = e => {
-          playlist = [...e.target.files].map(f => ({
-            name: f.name,
-            url: URL.createObjectURL(f)
-          }));
-          renderPlaylist();
-          playIndex(0);
-        };
-        picker.click();
-        return;
+    const picker = document.createElement('input');
+    picker.type = 'file';
+    picker.accept = 'audio/*';
+    picker.multiple = true;
+    picker.onchange = async e => {
+      for (const f of e.target.files) {
+        await simpanMP3(f);
       }
-      localStorage.setItem('playlist', JSON.stringify(playlist.map(p => ({ name: p.name }))));
-      renderPlaylist();
+      await muatSemuaMP3();
       playIndex(0);
-    } catch (err) {
-      console.log('Batal memilih file', err);
-    }
+    };
+    picker.click();
   };
   document.querySelector('.container').prepend(btn);
 }
 
-// === RENDER & PUTAR ===
+// === RENDER & PLAY ===
 function renderPlaylist(){
   playlistEl.innerHTML = playlist.map((s,i)=>`
     <li class="${i===currentIndex?'active':''}" data-i="${i}">
@@ -112,7 +116,6 @@ function renderPlaylist(){
       <button class="delete-btn" data-del="${i}">✖</button>
     </li>
   `).join('');
-  localStorage.setItem('playlist', JSON.stringify(playlist.map(p => ({ name: p.name }))));
 }
 
 function playIndex(i){
@@ -125,10 +128,13 @@ function playIndex(i){
   renderPlaylist();
 }
 
-// === NAVIGASI PLAYLIST ===
-playlistEl.addEventListener('click', e=>{
+// === NAVIGASI ===
+playlistEl.addEventListener('click', async e=>{
   if(e.target.dataset.del){
-    playlist.splice(e.target.dataset.del,1);
+    const i = parseInt(e.target.dataset.del);
+    const song = playlist[i];
+    await db.delete('songs', song.name);
+    playlist.splice(i,1);
     renderPlaylist();
   } else if(e.target.dataset.i){
     playIndex(parseInt(e.target.dataset.i));
@@ -163,17 +169,11 @@ document.querySelectorAll('.theme-btn').forEach(btn=>{
 const savedTheme = localStorage.getItem('theme');
 if(savedTheme) document.documentElement.setAttribute('data-theme', savedTheme);
 
-// === AUDIO CONTEXT FIX (untuk Android) ===
+// === INISIASI ===
 document.body.addEventListener('click', ()=>{ if(ctx.state==='suspended') ctx.resume(); });
 
-// === INISIALISASI ===
 (async ()=>{
+  await initDB();
   buatTombolPilih();
-
-  // Kalau playlist sebelumnya tersimpan, tampilkan otomatis
-  if (playlist.length > 0) {
-    renderPlaylist();
-  } else {
-    console.log("Belum ada lagu tersimpan, silakan pilih file MP3.");
-  }
+  await muatSemuaMP3(); // load offline songs
 })();
