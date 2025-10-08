@@ -1,32 +1,32 @@
-// === MUSIKA MP3 PLAYER (versi offline dengan IndexedDB) ===
+// === MUSIKA MP3 PLAYER - Versi Final (Offline + Folder + UI Modern) ===
 import { openDB } from 'https://unpkg.com/idb?module';
 
+// Elemen utama
 const audio = document.getElementById('audio');
 const playlistEl = document.getElementById('playlist');
 const prevBtn = document.getElementById('prevBtn');
 const nextBtn = document.getElementById('nextBtn');
 const shuffleBtn = document.getElementById('shuffleBtn');
-const miniPlayer = document.getElementById('miniPlayer');
-const miniTitle = document.getElementById('miniTitle');
-const miniPrev = document.getElementById('miniPrev');
-const miniPlay = document.getElementById('miniPlay');
-const miniNext = document.getElementById('miniNext');
+const playBtn = document.getElementById('playBtn');
+const pickBtn = document.getElementById('pickBtn');
 
 let playlist = [];
 let currentIndex = 0;
 let shuffleMode = false;
 
-// === INIT IndexedDB ===
+// === IndexedDB untuk offline storage ===
 let db;
 async function initDB() {
   db = await openDB('musika-db', 1, {
     upgrade(db) {
-      db.createObjectStore('songs', { keyPath: 'name' });
+      if (!db.objectStoreNames.contains('songs')) {
+        db.createObjectStore('songs', { keyPath: 'name' });
+      }
     },
   });
 }
 
-// === SIMPAN & MUAT MP3 ===
+// === Simpan & muat MP3 ===
 async function simpanMP3(file) {
   const arrayBuffer = await file.arrayBuffer();
   await db.put('songs', { name: file.name, data: arrayBuffer });
@@ -42,7 +42,7 @@ async function muatSemuaMP3() {
   renderPlaylist();
 }
 
-// === AUDIO CONTEXT + VISUALIZER ===
+// === VISUALIZER & AUDIO FILTERS ===
 const ctx = new (window.AudioContext || window.webkitAudioContext)();
 const source = ctx.createMediaElementSource(audio);
 const bass = ctx.createBiquadFilter(); bass.type = "lowshelf";
@@ -51,16 +51,7 @@ const treble = ctx.createBiquadFilter(); treble.type = "highshelf";
 const analyser = ctx.createAnalyser(); analyser.fftSize = 256;
 source.connect(bass).connect(mid).connect(treble).connect(analyser).connect(ctx.destination);
 
-['bass','mid','treble'].forEach(id=>{
-  document.getElementById(id).addEventListener('input', e=>{
-    const v = e.target.value;
-    if(id==='bass') bass.gain.value=v;
-    if(id==='mid') mid.gain.value=v;
-    if(id==='treble') treble.gain.value=v;
-  });
-});
-
-// === VISUALIZER ===
+// visualizer DJ style (vertical bars)
 const canvas = document.getElementById('visualizer');
 const vctx = canvas.getContext('2d');
 function draw() {
@@ -69,111 +60,127 @@ function draw() {
   analyser.getByteFrequencyData(data);
   const width = canvas.width = canvas.offsetWidth;
   const height = canvas.height = 100;
-  vctx.clearRect(0,0,width,height);
+  vctx.clearRect(0, 0, width, height);
   const barW = width / data.length;
-  for (let i=0; i<data.length; i++){
-    const h = data[i]/2;
-    const grad = vctx.createLinearGradient(0,0,0,height);
-    grad.addColorStop(0,'#fff');
-    grad.addColorStop(1,getComputedStyle(document.documentElement).getPropertyValue('--neon'));
+  for (let i = 0; i < data.length; i++) {
+    const h = (data[i] / 255) * height;
+    const grad = vctx.createLinearGradient(0, height - h, 0, height);
+    grad.addColorStop(0, '#fff');
+    grad.addColorStop(1, getComputedStyle(document.documentElement).getPropertyValue('--neon'));
     vctx.fillStyle = grad;
-    vctx.fillRect(i*barW,height-h,barW-1,h);
+    vctx.fillRect(i * barW, height - h, barW - 1, h);
   }
 }
 draw();
 
-// === PILIH FILE ===
-function buatTombolPilih() {
-  if (document.getElementById('pickBtn')) return;
-  const btn = document.createElement('button');
-  btn.id = 'pickBtn';
-  btn.textContent = "📂 Tambah Lagu MP3";
-  btn.style.margin = '15px';
-  btn.style.fontSize = '16px';
-  btn.style.padding = '10px';
-  btn.onclick = async () => {
-    const picker = document.createElement('input');
-    picker.type = 'file';
-    picker.accept = 'audio/*';
-    picker.multiple = true;
-    picker.onchange = async e => {
-      for (const f of e.target.files) {
-        await simpanMP3(f);
+// === Pilih File / Folder ===
+pickBtn.onclick = async () => {
+  try {
+    if ('showDirectoryPicker' in window) {
+      const folder = await window.showDirectoryPicker();
+      for await (const entry of folder.values()) {
+        if (entry.kind === 'file' && entry.name.toLowerCase().endsWith('.mp3')) {
+          const file = await entry.getFile();
+          await simpanMP3(file);
+        }
       }
-      await muatSemuaMP3();
-      playIndex(0);
-    };
-    picker.click();
-  };
-  document.querySelector('.container').prepend(btn);
-}
+    } else {
+      // fallback: pilih file manual
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'audio/*';
+      input.multiple = true;
+      input.onchange = async e => {
+        for (const f of e.target.files) {
+          await simpanMP3(f);
+        }
+        await muatSemuaMP3();
+        playIndex(0);
+      };
+      input.click();
+      return;
+    }
+    await muatSemuaMP3();
+    playIndex(0);
+  } catch (err) {
+    console.log('Folder/file tidak dipilih:', err);
+  }
+};
 
-// === RENDER & PLAY ===
-function renderPlaylist(){
-  playlistEl.innerHTML = playlist.map((s,i)=>`
-    <li class="${i===currentIndex?'active':''}" data-i="${i}">
-      ${s.name}
-      <button class="delete-btn" data-del="${i}">✖</button>
-    </li>
+// === Render playlist grid ===
+function renderPlaylist() {
+  playlistEl.innerHTML = playlist.map((s, i) => `
+    <div class="song-card ${i === currentIndex ? 'active' : ''}" data-i="${i}">
+      <p>${s.name}</p>
+    </div>
   `).join('');
 }
 
-function playIndex(i){
-  if(playlist.length===0) return;
+// === Kontrol pemutaran ===
+function playIndex(i) {
+  if (playlist.length === 0) return;
   currentIndex = i;
   const song = playlist[i];
   audio.src = song.url;
   audio.play();
-  miniTitle.textContent = "▶️ " + song.name;
+  playBtn.textContent = "⏸️";
   renderPlaylist();
 }
 
-// === NAVIGASI ===
-playlistEl.addEventListener('click', async e=>{
-  if(e.target.dataset.del){
-    const i = parseInt(e.target.dataset.del);
-    const song = playlist[i];
-    await db.delete('songs', song.name);
-    playlist.splice(i,1);
-    renderPlaylist();
-  } else if(e.target.dataset.i){
-    playIndex(parseInt(e.target.dataset.i));
+playBtn.onclick = () => {
+  if (audio.paused) {
+    audio.play();
+    playBtn.textContent = "⏸️";
+  } else {
+    audio.pause();
+    playBtn.textContent = "▶️";
   }
-});
-nextBtn.onclick = miniNext.onclick = ()=> nextSong();
-prevBtn.onclick = miniPrev.onclick = ()=> prevSong();
-shuffleBtn.onclick = ()=> shuffleMode = !shuffleMode;
-miniPlay.onclick = ()=> audio.paused ? audio.play() : audio.pause();
-audio.addEventListener('ended', nextSong);
-function nextSong(){
-  if(playlist.length===0) return;
+};
+
+// tombol navigasi
+nextBtn.onclick = () => nextSong();
+prevBtn.onclick = () => prevSong();
+shuffleBtn.onclick = () => shuffleMode = !shuffleMode;
+
+function nextSong() {
+  if (playlist.length === 0) return;
   currentIndex = shuffleMode
-    ? Math.floor(Math.random()*playlist.length)
-    : (currentIndex+1)%playlist.length;
-  playIndex(currentIndex);
-}
-function prevSong(){
-  if(playlist.length===0) return;
-  currentIndex = (currentIndex-1+playlist.length)%playlist.length;
+    ? Math.floor(Math.random() * playlist.length)
+    : (currentIndex + 1) % playlist.length;
   playIndex(currentIndex);
 }
 
-// === THEME SWITCHER ===
-document.querySelectorAll('.theme-btn').forEach(btn=>{
-  btn.addEventListener('click', ()=>{
+function prevSong() {
+  if (playlist.length === 0) return;
+  currentIndex = (currentIndex - 1 + playlist.length) % playlist.length;
+  playIndex(currentIndex);
+}
+
+audio.addEventListener('ended', nextSong);
+
+// === Klik pada grid card ===
+playlistEl.addEventListener('click', e => {
+  const i = e.target.closest('.song-card')?.dataset.i;
+  if (i !== undefined) playIndex(parseInt(i));
+});
+
+// === Tema ===
+document.querySelectorAll('.theme-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
     const theme = btn.dataset.theme;
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('theme', theme);
   });
 });
 const savedTheme = localStorage.getItem('theme');
-if(savedTheme) document.documentElement.setAttribute('data-theme', savedTheme);
+if (savedTheme) document.documentElement.setAttribute('data-theme', savedTheme);
 
-// === INISIASI ===
-document.body.addEventListener('click', ()=>{ if(ctx.state==='suspended') ctx.resume(); });
+// === Init ===
+document.body.addEventListener('click', () => {
+  if (ctx.state === 'suspended') ctx.resume();
+});
 
-(async ()=>{
+(async () => {
   await initDB();
-  buatTombolPilih();
-  await muatSemuaMP3(); // load offline songs
+  await muatSemuaMP3(); // load lagu tersimpan (offline)
 })();
